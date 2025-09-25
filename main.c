@@ -21,8 +21,6 @@ static inline uint64_t rdtsc()
 	return a | ((uint64_t)d << 32);
 }
 
-///@brief to get ticks with a combined CPUID instruction
-static inline uint64_t rdtscp()
 
 ///@brief to get time from clock_gettime and convert it to nano seconds
 static inline uint64_t timeInNanoSec()
