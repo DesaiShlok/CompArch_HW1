@@ -5,8 +5,39 @@
 #include <unistd.h>
 #include <inttypes.h>
 #include <time.h>
+#include <x86intrin.h>
+
+//files added to try preemp_enable, preempt_disable, hardirq modifications
+//#include <linux/module.h>
+//#include <linux/kernel.h>
+//#include <linux/init.h>
+//#include <linux/hardirq.h>
+//#include <linux/preempt.h>
+//#include <linux/sched.h>
 
 #define REPEAT 1000000
+
+static inline void cpuid(uint32_t leaf, uint32_t subleaf,
+                         uint32_t *eax, uint32_t *ebx,
+                         uint32_t *ecx, uint32_t *edx) {
+    __asm__ volatile("cpuid"
+                     : "=a"(*eax), "=b"(*ebx),
+                       "=c"(*ecx), "=d"(*edx)
+                     : "a"(leaf), "c"(subleaf));
+}
+
+int checkInvariantTsc() {
+    unsigned int eax, ebx, ecx, edx;
+    cpuid(0x80000007,0, &eax, &ebx, &ecx, &edx);
+
+    if ((edx >> 8) & 1) {
+        printf("CPU supports invariant TSC. Using RDTSC.\n");
+        return 1;
+    } else {
+        printf("CPU does NOT support invariant TSC. Falling back to CLOCK_MONOTONIC_RAW.\n");
+        return 0;
+    }
+}
 
 // Flush cache line
 static inline void clflush(volatile void *p) {
@@ -59,11 +90,20 @@ void memtest(char *buff1, char *buff2, size_t size, const char *fileTicks) {
 
     uint64_t totalTicks = 0;
     for (long rep = 0; rep < REPEAT; rep++) {
-        uint64_t start = rdtsc_start();
+	
+	/*
+	unsigned long flags;
+        preeempt_disable();
+	raw_local_irq_save(flags);
+	*/
+	uint64_t start = rdtsc_start();
         memcpy(buff2, buff1, size);
         uint64_t end = rdtsc_end();
-
-        clflush(buff1);
+	/*
+	raw_local_irq_restore(flags);
+	preempt_enable();
+        */
+	clflush(buff1);
         clflush(buff2);
 
         uint64_t diff = end - start;
@@ -103,7 +143,8 @@ void calcTimes(char *buff1, char *buff2, size_t size, const char *fileNs) {
 
 int main() {
     // Manually define all file names
-    char *fileTicks[] = {
+    checkInvariantTsc() ;
+	char *fileTicks[] = {
         "outTicks_2_6.txt", "outTicks_2_7.txt", "outTicks_2_8.txt",
         "outTicks_2_9.txt", "outTicks_2_10.txt", "outTicks_2_11.txt",
         "outTicks_2_12.txt", "outTicks_2_13.txt", "outTicks_2_14.txt",
