@@ -29,7 +29,7 @@ $(TARGET_B): $(INPUT_B)
 
 $(TARGET_C): $(INPUT_C)
 	@echo "Compiling $(INPUT_C)"
-	$(CC) $(CFLAGS) -o $(TARGET_C) $(INPUT_C)
+	$(CC) $(CFLAGS) -D_GNU_SOURCE -o $(TARGET_C) $(INPUT_C)
 
 # Compile and run checkRDTSCP
 $(TARGET_RDTSC): $(INPUT_RDTSC)
@@ -37,6 +37,12 @@ $(TARGET_RDTSC): $(INPUT_RDTSC)
 	$(CC) $(CFLAGS) -o $(TARGET_RDTSC) $(INPUT_RDTSC)
 	@echo "Checking if RDTSCP is supported..."
 	./$(TARGET_RDTSC)
+runA:
+	./outA
+runB:
+	./outB
+runC:
+	taskset -c 2 ./outC #pins the c file execution to core 2 and runs it
 
 # Clean build
 clean:
