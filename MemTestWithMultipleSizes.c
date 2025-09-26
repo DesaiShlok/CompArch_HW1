@@ -140,8 +140,8 @@ static void writeToFile(uint64_t value, const char *filename) {
 }
 
 // Measure TSC ticks
-void memtest(char *buff1, char *buff2, size_t size, const char *fileTicks) {
-    createOutFile(fileTicks);
+void memtest(char *buff1, char *buff2, size_t size, const char *fileNameMemTest) {
+    createOutFile(fileNameMemTest);
 
     uint64_t totalTicks = 0;
     uint64_t diffInNsFromTicks=0;
@@ -164,10 +164,10 @@ void memtest(char *buff1, char *buff2, size_t size, const char *fileTicks) {
 
         uint64_t diff = end - start;
 	diffInNsFromTicks=((diff*1000000000)/cpuFrequencyInHz); 
-        //totalTicks += diffInNsFromTicks;
+        totalTicks += diffInNsFromTicks;
 	
-	totalTicks +=diff;
-        writeToFile(diff, fileTicks);
+	//totalTicks +=diff;
+        writeToFile(diffInNsFromTicks, fileNameMemTest);
     }
 
     printf("Buffer size %zu bytes -- Total ticks: %llu, Average ticks: %llu\n",
@@ -177,10 +177,9 @@ void memtest(char *buff1, char *buff2, size_t size, const char *fileTicks) {
 }
 
 // Measure time using clock_gettime
-void calcTimes(char *buff1, char *buff2, size_t size, const char *fileNs) {
-    createOutFile(fileNs);
+void calcTimes(char *buff1, char *buff2, size_t size, const char *fileNameCalcTimes) {
+    createOutFile(fileNameCalcTimes);
 
-    uint32_t eax, ebx, ecx, edx;
     uint64_t totalNs = 0;
     for (long rep = 0; rep < REPEAT; rep++) {
         
@@ -194,7 +193,7 @@ void calcTimes(char *buff1, char *buff2, size_t size, const char *fileNs) {
 
         uint64_t diff = end - start;
         totalNs += diff;
-        writeToFile(diff, fileNs);
+        writeToFile(diff, fileNameCalcTimes);
     }
 
     printf("Buffer size %zu bytes -- Total ns: %llu, Average ns: %llu\n",
@@ -209,22 +208,22 @@ int main() {
 
 	// Manually define all file names
     	checkInvariantTsc() ;
-	char *fileTicks[] = {
-	        "outTicks_2_6.txt", "outTicks_2_7.txt", "outTicks_2_8.txt",
-	        "outTicks_2_9.txt", "outTicks_2_10.txt", "outTicks_2_11.txt",
-	        "outTicks_2_12.txt", "outTicks_2_13.txt", "outTicks_2_14.txt",
-	        "outTicks_2_15.txt", "outTicks_2_16.txt", "outTicks_2_20.txt",
-        	"outTicks_2_21.txt"
-    	};
 
-    	char *fileNs[] = {
-        	"outNs_2_6.txt", "outNs_2_7.txt", "outNs_2_8.txt",
-        	"outNs_2_9.txt", "outNs_2_10.txt", "outNs_2_11.txt",
-        	"outNs_2_12.txt", "outNs_2_13.txt", "outNs_2_14.txt",
-        	"outNs_2_15.txt", "outNs_2_16.txt", "outNs_2_20.txt",
-        	"outNs_2_21.txt"
-    	};
+char *fileNameMemTest[] = {
+        "timeUsingMemTest_2_6.txt", "timeUsingMemTest_2_7.txt", "timeUsingMemTest_2_8.txt",
+        "timeUsingMemTest_2_9.txt", "timeUsingMemTest_2_10.txt", "timeUsingMemTest_2_11.txt",
+        "timeUsingMemTest_2_12.txt", "timeUsingMemTest_2_13.txt", "timeUsingMemTest_2_14.txt",
+        "timeUsingMemTest_2_15.txt", "timeUsingMemTest_2_16.txt", "timeUsingMemTest_2_20.txt",
+        "timeUsingMemTest_2_21.txt"
+};
 
+char *fileNameCalcTimes[] = {
+        "timeUsingCalcTimes_2_6.txt", "timeUsingCalcTimes_2_7.txt", "timeUsingCalcTimes_2_8.txt",
+        "timeUsingCalcTimes_2_9.txt", "timeUsingCalcTimes_2_10.txt", "timeUsingCalcTimes_2_11.txt",
+        "timeUsingCalcTimes_2_12.txt", "timeUsingCalcTimes_2_13.txt", "timeUsingCalcTimes_2_14.txt",
+        "timeUsingCalcTimes_2_15.txt", "timeUsingCalcTimes_2_16.txt", "timeUsingCalcTimes_2_20.txt",
+        "timeUsingCalcTimes_2_21.txt"
+};
     	int sizes[] = {6,7,8,9,10,11,12,13,14,15,16,20,21};
     	int nSizes = 13;
 
@@ -239,8 +238,8 @@ int main() {
 
         	memset(buf1, '1', bufSize);
 
-        	memtest(buf1, buf2, bufSize, fileTicks[i]);
-        	calcTimes(buf1, buf2, bufSize, fileNs[i]);
+        	memtest(buf1, buf2, bufSize, fileNameMemTest[i]);
+        	calcTimes(buf1, buf2, bufSize, fileNameCalcTimes[i]);
 
         	free(buf1);
         	free(buf2);
