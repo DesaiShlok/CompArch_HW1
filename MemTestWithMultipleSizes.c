@@ -7,6 +7,7 @@
 #include <time.h>
 #include <x86intrin.h>
 #include <sched.h>
+#include <sys/mman.h>// for mlock
 
 //#define _GNU_SOURCE // have added a replacement as a compiler flag in the Makefile
 
@@ -231,15 +232,30 @@ char *fileNameCalcTimes[] = {
        		size_t bufSize = 1ULL << sizes[i];
         	char *buf1 = malloc(bufSize);
         	char *buf2 = malloc(bufSize);
-        	if (!buf1 || !buf2) {
+		
+		if(mlock(buf1, bufSize)==-1)
+                {
+                        printf("mlock failed!\n");
+                }
+		if(mlock(buf2, bufSize)==-1)
+		{
+			printf("mlock failed!\n");
+		}
+
+		if (!buf1 || !buf2) {
            		printf("Failed to allocate buffer of size %zu\n", bufSize);
             		exit(1);
         	}
 
         	memset(buf1, '1', bufSize);
-
         	memtest(buf1, buf2, bufSize, fileNameMemTest[i]);
         	calcTimes(buf1, buf2, bufSize, fileNameCalcTimes[i]);
+		if(mlock(buf1, bufSize)==-1){
+                        printf("munlock failed!\n");
+                }
+                if(mlock(buf2, bufSize)==-1){
+                        printf("munlock failed!\n");
+                }
 
         	free(buf1);
         	free(buf2);
