@@ -43,8 +43,8 @@ runB:
 	./outB
 runC:
 	sudo cpupower frequency-set -g userspace #switch to userspace governer
-	sudo cpupower frequency-set -d 2400MHz -u 2400MHz #set min max freq locks
-	echo 1 | sudo tee /sys/devices/system/cpu/intel_pstate/no_turbo #turn off turbo boost on CPU
+	sudo cpupower frequency-set -d 3000MHz -u 3000MHz #set min max freq locks
+	echo 0 | sudo tee /sys/devices/system/cpu/cpufreq/boost
 	sudo cpupower idle-set -D 0
 	taskset -c 2 ./outC #pins the c file execution to core 2 and runs it
 

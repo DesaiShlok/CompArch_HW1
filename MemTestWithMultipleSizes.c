@@ -7,27 +7,23 @@
 #include <time.h>
 #include <x86intrin.h>
 #include <sched.h>
-#include <sys/mman.h>// for mlock
+#include <sys/mman.h>
+#include <immintrin.h>
 
-//#define _GNU_SOURCE // have added a replacement as a compiler flag in the Makefile
-
-//files added to try preemp_enable, preempt_disable, hardirq modifications
-//#include <linux/module.h>
-//#include <linux/kernel.h>
-//#include <linux/init.h>
-//#include <linux/hardirq.h>
-//#include <linux/preempt.h>
-
-#define REPEAT 1000000
+#define REPEAT 10000
 #define USED_CORE 2
+#define CACHE_LINE_SIZE 64
 
-uint64_t cpuFrequencyInHz=0;
+uint64_t cpuFrequencyInMHz=0;
+uint64_t mfenceLatency=0;
+
+
 static inline float cpuFreqMhz(int coreIndex)
 {
 	FILE *fp = fopen("/proc/cpuinfo", "r");
 	if(!fp){
-	printf("couldnt read cpu freq\n");
-	return 0;
+	    printf("couldnt read cpu freq\n");
+	    return 0;
 	}
 	char buffer[256];
 	int count=0;
@@ -81,7 +77,7 @@ static inline void pinProcessToCPU(int8_t cpuNum)
 {
 	cpu_set_t mask;
 	CPU_ZERO(&mask);
-	CPU_SET(cpuNum, &mask);  // set mask to run on CPU 2
+	CPU_SET(cpuNum, &mask);  
 
 	pid_t pid = getpid();
 
@@ -95,12 +91,21 @@ static inline void pinProcessToCPU(int8_t cpuNum)
 }
 
 
-// Flush cache line
+
 static inline void clflush(volatile void *p) {
     asm volatile("clflush (%0)" :: "r"(p));
 }
 
-// Read TSC with serialization
+static inline void flush_buffer(volatile void *buf, size_t size) {
+    for (size_t i = 0; i < size; i += CACHE_LINE_SIZE) {
+        clflush((char*)buf + i);
+    }
+}
+static inline void memory_fence(void) {
+    asm volatile("mfence" ::: "memory");
+}
+
+
 static inline uint64_t rdtsc_start() {
     unsigned int a, d;
     asm volatile("cpuid\n\t"
@@ -120,146 +125,131 @@ static inline uint64_t rdtsc_end() {
     return ((uint64_t)d << 32) | a;
 }
 
-// Get time in nanoseconds
-static inline uint64_t timeInNanoSec() {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return ((uint64_t)ts.tv_sec * 1000000000ULL + ts.tv_nsec);
-}
 
-// File helpers
-static void createOutFile(const char *filename) {
-    FILE *fp = fopen(filename, "w"); // overwrite old file
-    if (fp) fclose(fp);
-}
+void memtest(char *buff1, char *buff2, size_t size, const char *fileNameTicksUsingMTest, const char *fileNameTimeUsingMTest) {
+    uint64_t *resultsTime = malloc(REPEAT * sizeof(uint64_t));
+    if (!resultsTime) {
+        printf("Failed to allocate memory for resultsTime array.\n");
+        return;
+    }
+    uint64_t *resultsTicks = malloc(REPEAT * sizeof(uint64_t));
+    if (!resultsTicks) {
+        printf("Failed to allocate memory for resultsTicks array.\n");
+        return;
+    }
 
-static void writeToFile(uint64_t value, const char *filename) {
-    FILE *fp = fopen(filename, "a");
-    if (!fp) return;
-    fprintf(fp, "%" PRIu64 "\n", value);
-    fclose(fp);
-}
+    uint64_t totalTime = 0, totalTicks = 0;
 
-// Measure TSC ticks
-void memtest(char *buff1, char *buff2, size_t size, const char *fileNameMemTest) {
-    createOutFile(fileNameMemTest);
-
-    uint64_t totalTicks = 0;
-    uint64_t diffInNsFromTicks=0;
     for (long rep = 0; rep < REPEAT; rep++) {
-	
-	/*
-	unsigned long flags;
-        preeempt_disable();
-	raw_local_irq_save(flags);
-	*/
-	uint64_t start = rdtsc_start();
+        flush_buffer(buff1, size);
+        flush_buffer(buff2, size);
+        memory_fence(); 
+        uint64_t start = rdtsc_start();
         memcpy(buff2, buff1, size);
+        memory_fence();
         uint64_t end = rdtsc_end();
-	/*
-	raw_local_irq_restore(flags);
-	preempt_enable();
-        */
-	clflush(buff1);
-        clflush(buff2);
-
-        uint64_t diff = end - start;
-	diffInNsFromTicks=((diff*1000000000)/cpuFrequencyInHz); 
-        totalTicks += diffInNsFromTicks;
-	
-	//totalTicks +=diff;
-        writeToFile(diffInNsFromTicks, fileNameMemTest);
-    }
-
-    printf("Buffer size %zu bytes -- Total ticks: %llu, Average ticks: %llu\n",
-           size,
-           (long long unsigned)totalTicks,
-           (long long unsigned)(totalTicks / REPEAT));
-}
-
-// Measure time using clock_gettime
-void calcTimes(char *buff1, char *buff2, size_t size, const char *fileNameCalcTimes) {
-    createOutFile(fileNameCalcTimes);
-
-    uint64_t totalNs = 0;
-    for (long rep = 0; rep < REPEAT; rep++) {
         
-    	//cpuid(0, 0, &eax, &ebx, &ecx, &edx);//To serialize
-	uint64_t start = timeInNanoSec();
-        memcpy(buff2, buff1, size);
-	int64_t end = timeInNanoSec();
-	//cpuid(0, 0, &eax, &ebx, &ecx, &edx);//To Serialize
-        clflush(buff1);
-        clflush(buff2);
-
-        uint64_t diff = end - start;
-        totalNs += diff;
-        writeToFile(diff, fileNameCalcTimes);
+        uint64_t diffTicks = (end - start);// in ticks
+        uint64_t diffTime=(uint64_t)((diffTicks*1000)/cpuFrequencyInMHz);// in nanoseconds
+      
+        resultsTime[rep] = (uint64_t)(diffTicks); // in ticks
+        resultsTicks[rep] = (uint64_t)(diffTime); // in nanoseconds
+        
+        totalTicks += diffTicks;
+        totalTime += diffTime;
+        
     }
 
-    printf("Buffer size %zu bytes -- Total ns: %llu, Average ns: %llu\n",
-           size,
-           (long long unsigned)totalNs,
-           (long long unsigned)(totalNs / REPEAT));
+    printf("Buffer size %zu bytes -- Total ticks: %llu, Average ticks: %llu, Total Time %llu ns, Average Time: %llu ns\n",
+           size, 
+           (unsigned long long)totalTicks, (unsigned long long)(totalTicks / REPEAT),
+           (unsigned long long)totalTime, (unsigned long long)(totalTime / REPEAT));
+
+    FILE *fpTicks = fopen(fileNameTicksUsingMTest, "w");
+    if (fpTicks) {
+        for (long rep = 0; rep < REPEAT; rep++) {
+            fprintf(fpTicks, "%" PRIu64 "\n", resultsTicks[rep]);
+        }
+        fclose(fpTicks);
+    }
+     FILE *fpTime = fopen(fileNameTimeUsingMTest, "w");
+    if (fpTime) {
+        for (long rep = 0; rep < REPEAT; rep++) {
+            fprintf(fpTime, "%" PRIu64 "\n", resultsTime[rep]);
+        }
+        fclose(fpTime);
+    }
+
+    free(resultsTime);
+    free(resultsTicks);
 }
 
 int main() {
 	pinProcessToCPU(USED_CORE);
-	cpuFrequencyInHz = (uint64_t)(cpuFreqMhz(USED_CORE)*1000000);
+    checkInvariantTsc() ;
+	cpuFrequencyInMHz = (uint64_t)(cpuFreqMhz(USED_CORE));
+	printf("CPU freq: %ld\n",cpuFrequencyInMHz);
 
-	// Manually define all file names
-    	checkInvariantTsc() ;
+	char *fileNameTicksUsingMTest[] = {
+        	"ticksUsingMTest_2_6.txt", "ticksUsingMTest_2_7.txt", "ticksUsingMTest_2_8.txt",
+        	"ticksUsingMTest_2_9.txt", "ticksUsingMTest_2_10.txt", "ticksUsingMTest_2_11.txt",
+        	"ticksUsingMTest_2_12.txt", "ticksUsingMTest_2_13.txt", "ticksUsingMTest_2_14.txt",
+        	"ticksUsingMTest_2_15.txt", "ticksUsingMTest_2_16.txt", "ticksUsingMTest_2_20.txt",
+        	"ticksUsingMTest_2_21.txt"
+	};
+    char *fileNameTimeUsingMTest[] = {
+        	"timeUsingMTest_2_6.txt", "timeUsingMTest_2_7.txt", "timeUsingMTest_2_8.txt",
+        	"timeUsingMTest_2_9.txt", "timeUsingMTest_2_10.txt", "timeUsingMTest_2_11.txt",
+        	"timeUsingMTest_2_12.txt", "timeUsingMTest_2_13.txt", "timeUsingMTest_2_14.txt",
+        	"timeUsingMTest_2_15.txt", "timeUsingMTest_2_16.txt", "timeUsingMTest_2_20.txt",
+        	"timeUsingMTest_2_21.txt"
+	};
+    int sizes[] = {
+        64,        // 2^6
+        128,       // 2^7
+        256,       // 2^8
+        512,       // 2^9
+        1024,      // 2^10
+        2048,      // 2^11
+        4096,      // 2^12
+        8192,      // 2^13
+        16384,     // 2^14
+        32768,     // 2^15
+        65536,     // 2^16
+        1048576,   // 2^20
+        2097152    // 2^21
+    };
+    int nSizes = 13;
 
-char *fileNameMemTest[] = {
-        "timeUsingMemTest_2_6.txt", "timeUsingMemTest_2_7.txt", "timeUsingMemTest_2_8.txt",
-        "timeUsingMemTest_2_9.txt", "timeUsingMemTest_2_10.txt", "timeUsingMemTest_2_11.txt",
-        "timeUsingMemTest_2_12.txt", "timeUsingMemTest_2_13.txt", "timeUsingMemTest_2_14.txt",
-        "timeUsingMemTest_2_15.txt", "timeUsingMemTest_2_16.txt", "timeUsingMemTest_2_20.txt",
-        "timeUsingMemTest_2_21.txt"
-};
+    for (int i = 0; i < nSizes; i++) {
+        size_t bufSize = sizes[i];
+        char *buf1 = malloc(bufSize);
+        char *buf2 = malloc(bufSize);
+    
+        if(mlock(buf1, bufSize)==-1)
+        {
+            printf("mlock failed!\n");
+        }
+        if(mlock(buf2, bufSize)==-1)
+        {
+            printf("mlock failed!\n");
+        }
 
-char *fileNameCalcTimes[] = {
-        "timeUsingCalcTimes_2_6.txt", "timeUsingCalcTimes_2_7.txt", "timeUsingCalcTimes_2_8.txt",
-        "timeUsingCalcTimes_2_9.txt", "timeUsingCalcTimes_2_10.txt", "timeUsingCalcTimes_2_11.txt",
-        "timeUsingCalcTimes_2_12.txt", "timeUsingCalcTimes_2_13.txt", "timeUsingCalcTimes_2_14.txt",
-        "timeUsingCalcTimes_2_15.txt", "timeUsingCalcTimes_2_16.txt", "timeUsingCalcTimes_2_20.txt",
-        "timeUsingCalcTimes_2_21.txt"
-};
-    	int sizes[] = {6,7,8,9,10,11,12,13,14,15,16,20,21};
-    	int nSizes = 13;
+        if (!buf1 || !buf2) {
+            printf("Failed to allocate buffer of size %zu\n", bufSize);
+            exit(1);
+        }
 
-    	for (int i = 0; i < nSizes; i++) {
-       		size_t bufSize = 1ULL << sizes[i];
-        	char *buf1 = malloc(bufSize);
-        	char *buf2 = malloc(bufSize);
-		
-		if(mlock(buf1, bufSize)==-1)
-                {
-                        printf("mlock failed!\n");
-                }
-		if(mlock(buf2, bufSize)==-1)
-		{
-			printf("mlock failed!\n");
-		}
+        memset(buf1, '1', bufSize);
+            
+        memtest(buf1, buf2, bufSize, fileNameTicksUsingMTest[i],fileNameTimeUsingMTest[i]);
+        
+        munlock(buf1, bufSize);
+        munlock(buf2, bufSize);
 
-		if (!buf1 || !buf2) {
-           		printf("Failed to allocate buffer of size %zu\n", bufSize);
-            		exit(1);
-        	}
-
-        	memset(buf1, '1', bufSize);
-        	memtest(buf1, buf2, bufSize, fileNameMemTest[i]);
-        	calcTimes(buf1, buf2, bufSize, fileNameCalcTimes[i]);
-		if(mlock(buf1, bufSize)==-1){
-                        printf("munlock failed!\n");
-                }
-                if(mlock(buf2, bufSize)==-1){
-                        printf("munlock failed!\n");
-                }
-
-        	free(buf1);
-        	free(buf2);
-    	}
+        free(buf1);
+        free(buf2);
+    }
 
 	return 0;
 }
